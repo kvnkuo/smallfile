@@ -3,6 +3,63 @@ smallfile
 
 A distributed workload generator for POSIX-like filesystems.
 
+New features:
+* JSON output format
+* response time post-processing
+
+# Table of contents
+
+[License](#license)
+
+[Introduction](#introduction)
+
+[__What it can do](#what-it-can-do)
+
+[__Restrictions](#restrictions)
+
+[How to specify test](#how-to-specify-test)
+
+[Results](#results)
+
+[__Postprocessing of response time data](#postprocessing-of-response-time-data)
+
+[How to run correctly](#how-to-run-correctly)
+
+[__Avoiding caching effects](#avoiding-caching-effects)
+
+[__Use of pause option](#use-of-pause-option)
+
+[Use with distributed filesystems](#use-with-distributed-filesystems)
+
+[__The dreaded startup timeout error](#the-dreaded-startup-timeout-error)
+
+[Use with local filesystems](#use-with-local-filesystems)
+
+[Use of subdirectories](#use-of-subdirectories)
+
+[Sharing directories across threads](#sharing-directories-across-threads)
+
+[Hashing files into directory tree](#hashing-files-into-directory-tree)
+
+[Random file size distribution option](#random-file-size-distribution-option)
+
+[Asynchronous file copy performance](#asynchronous-file-copy-performance)
+
+[Comparable Benchmarks](#comparable-benchmarks)
+
+[Design principles](#design-principles)
+
+[Synchronization](#synchronization)
+
+[__Test parameter transmission](#test-parameter-transmission)
+
+[__Launching remote worker threads](#launching-remote-worker-threads)
+
+[__Returning results](#returning-results)
+
+
+License
+=========
 Copyright [2012] [Ben England]
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,12 +81,12 @@ smallfile is a python-based distributed POSIX workload generator
 which can be used to quickly measure performance for a
 variety of metadata-intensive workloads across an entire
 cluster.  It has no dependencies on any specific filesystem or implementation 
-It was written to complement use of iozone benchmark for measuring performance 
-of large-file workloads, and borrows concepts from iozone.
+It was written to complement use of fio and iozone benchmark for measuring performance 
+of large-file workloads, and borrows some concepts from iozone.
 and Ric Wheeler's fs_mark.  It was developed by Ben England starting in March 2009.
 
 What it can do
-========
+--------
 
 * multi-host - manages workload generators on multiple hosts
 * aggregates throughput - for entire set of hosts
@@ -73,11 +130,12 @@ distributed test.
 
 To see what parameters are supported by smallfile_cli.py, do 
 
-    # python smallfile_cli.py -h
+    # python smallfile_cli.py --help
 
 Boolean true/false parameters can be set to either Y
 (true) or N (false). Every command consists of a sequence of parameter
-name-value pairs with the format --name value .
+name-value pairs with the format --name value .  To see what default values are,
+use --help option.
 
 The parameters are:
 
@@ -92,21 +150,18 @@ The parameters are:
  * --file-size -- total amount of data accessed per file.   If zero then no
   reads or writes are performed. 
  * --file-size-distribution – only supported value today is exponential.
-  Default: fixed file size.
  * --record-size -- record size in KB, how much data is transferred in a single
   read or write system call.  If 0 then it is set to the minimum of the file
-  size and 1-MiB record size limit. Default: 0
+  size and 1-MiB record size limit.
  * --files-per-dir -- maximum number of files contained in any one directory.
-  Default: 200
  * --dirs-per-dir -- maximum number of subdirectories contained in any one
-  directory. Default: 20
+  directory.
  * --hash-into-dirs – if Y then assign next file to a directory using a hash
   function, otherwise assign next –files-per-dir files to next directory.
-  Default: N
  * --permute-host-dirs – if Y then have each host process a different
   subdirectory tree than it otherwise would (see below for directory tree
-  structure). Default: N
- * --same-dir -- if Y then threads will share a single directory. Default: N
+  structure).
+ * --same-dir -- if Y then threads will share a single directory.
  * --network-sync-dir – don't need to specify unless you run a multi-host test
   and the –top parameter points to a non-shared directory (see discussion
   below). Default: network_shared subdirectory under –top dir.
@@ -117,19 +172,18 @@ The parameters are:
 previous runs for example)
  * --suffix -- a string suffix to append to files (so they don't collide with
   previous runs for example)
- * --incompressible – (default N) if Y then generate a pure-random file that
+ * --incompressible – if Y then generate a pure-random file that
   will not be compressible (useful for tests where intermediate network or file
   copy utility attempts to compress data
- * --record-ctime-size -- default N, if Y then label each created file with an
+ * --record-ctime-size -- if Y then label each created file with an
   xattr containing a time of creation and a file size. This will be used by
   –await-create operation to compute performance of asynchonous file
   replication/copy.
  * --finish -- if Y, thread will complete all requested file operations even if
-  measurement has finished. Default: Y
+  measurement has finished.
  * --stonewall -- if Y then thread will measure throughput as soon as it detects
-  that another thread has finished. Default: N
+  that another thread has finished.
  * --verify-read – if Y then smallfile will verify read data is correct.
-  Default: Y
  * --response-times – if Y then save response time for each file operation in a
   rsptimes\*csv file in the shared network directory. Record format is
   operation-type, start-time, response-time. The operation type is included so
@@ -137,10 +191,11 @@ previous runs for example)
   data from these runs. The start-time field is the time that the file
   operation started, down to microsecond resolution. The response time field is
   the file operation duration down to microsecond resolution.
+ * --output-json - if specified then write results in JSON format to the specified pathname for easier postprocessing.
  * --remote-pgm-dir – don't need to specify this unless the smallfile software
   lives in a different directory on the target hosts and the test-driver host. 
  * --pause -- integer (microseconds) each thread will wait before starting next
-  file. Default: 0
+  file.
 
 Operation types are:
 
@@ -207,15 +262,54 @@ across all client hosts.  The percentage of requested files which were
 processed in the measurement interval is also displayed, and if the number is
 lower than a threshold (default 70%) then an error is raised.
 
-response times for operations on each file are saved by thread in .csv form in
-the shared directory.  For example, you can turn these into an X-Y scatterplot so that you can see how response time varies over time.   For example:
+Postprocessing of response time data
+--------
+
+If you specify **--response-times Y** in the command, smallfile will save response time of each operation in per-thread output files in the shared directory as rsptimes*.csv.   For example, you can turn these into an X-Y scatterplot so that you can see how response time varies over time.   For example:
 
     # python smallfile_cli.py --response-times Y
-    # ls -ltr /var/tmp/rsptimes\*.csv
+    # ls -ltr /var/tmp/smf/network_shared/rsptimes*.csv
 
 You should see 1 .csv file per thread.  These files can be loaded into any
 spreadsheet application and graphed.  An x-y scatterplot can be useful to see
 changes over time in response time.
+
+But if you just want statistics, you can generate these using the postprocessing command:
+
+    # python smallfile_rsptimes_stats.py /var/tmp/smf/network_shared
+
+This will generate statistics summary in ../rsptimes-summary.csv , in this example you would find it in /var/tmp/smf/.  The file is in a form suitable for loading into a spreadsheet and graphing.  A simple example is generated using the regression test **gen-fake-rsptimes.sh** .  The result of this test is output like this:
+
+```
+filtering out suffix .foo.com from hostnames
+rsp. time result summary at: /tmp/12573.tmp/../rsptime-summary.csv
+```
+The first line illustrates that you can remove a common hostname suffix in the output so that it is easier to read and graph.  In this test we pass the optional parameter **--common-hostname-suffix foo.com** to smallfile_rsptimes_stats.py.  The inputs to smallfile_rsptimes_stats.py are contained in ```/tmp/12573.tmp/``` and the output looks like this:
+```
+
+$ more /tmp/12573.tmp/../rsptime-summary.csv
+host:thread, samples, min, max, mean, %dev, 50 %ile, 90 %ile, 95 %ile, 99 %ile, 
+all:all,320, 1.000000, 40.000000, 20.500000, 56.397441, 20.500000, 36.100000, 38.050000, 40.000000, 
+
+host-21:all,160, 1.000000, 40.000000, 20.500000, 56.486046, 20.500000, 36.100000, 38.050000, 40.000000, 
+host-22:all,160, 1.000000, 40.000000, 20.500000, 56.486046, 20.500000, 36.100000, 38.050000, 40.000000, 
+
+host-21:01,40, 1.000000, 40.000000, 20.500000, 57.026595, 20.500000, 36.100000, 38.050000, 39.610000, 
+host-21:02,40, 1.000000, 40.000000, 20.500000, 57.026595, 20.500000, 36.100000, 38.050000, 39.610000, 
+host-21:03,40, 1.000000, 40.000000, 20.500000, 57.026595, 20.500000, 36.100000, 38.050000, 39.610000, 
+host-21:04,40, 1.000000, 40.000000, 20.500000, 57.026595, 20.500000, 36.100000, 38.050000, 39.610000, 
+host-22:01,40, 1.000000, 40.000000, 20.500000, 57.026595, 20.500000, 36.100000, 38.050000, 39.610000, 
+host-22:02,40, 1.000000, 40.000000, 20.500000, 57.026595, 20.500000, 36.100000, 38.050000, 39.610000, 
+host-22:03,40, 1.000000, 40.000000, 20.500000, 57.026595, 20.500000, 36.100000, 38.050000, 39.610000, 
+host-22:04,40, 1.000000, 40.000000, 20.500000, 57.026595, 20.500000, 36.100000, 38.050000, 39.610000, 
+
+```
+* record 1 - contains headers for each column
+* record 2 - contains aggregate response time statistics for the entire distributed system, if it consists of more than 1 host
+* record 4-5 - contains per-host aggregate statistics
+* record 7-end - contains per-thread stats, sorted by host then thread
+
+You'll notice that even though all the threads have the same simulated response times, the 99th percentile values for each thread are different than the aggregate stats per host or for the entire test!  How can this be?  Percentiles are computed using the [numpy.percentiles](https://docs.scipy.org/doc/numpy/reference/generated/numpy.percentile.html) function, which linearly interpolates to obtain percentile values.  In the aggregate stats, the 99th percentile is linearly interpolated between two samples of 40 seconds, whereas in the per-thread results the 99th percentile is interpolated between samples of 40 and 39 seconds.  
 
 How to run correctly
 =============
@@ -234,12 +328,12 @@ must be cleared. In part this is done using the command: "echo 1 > /proc/sys/vm/
 Gluster have their own internal caches - in that case you might even need to
 remount the filesystem or even restart the storage pool/volume.
 
-Use of --pause in multi-thread tests
+Use of pause option
 ==========
 
 Normally, smallfile stops the throughput measurement for the test as soon as
 the first thread finishes processing all its files.  In some filesystems, the first thread that starts running will be operating at much higher speed (example: NFS writes) and can easily finish before other threads have a chance to get started.  This immediately invalidates the test.  To make this less likely, it is possible to insert a per-file delay into each
-thread with the --pause option so that the other threads have a chance to
+thread with the **--pause** option so that the other threads have a chance to
 participate in the test during the measurement interval.    It is preferable to
 run a longer test instead, because in some cases you might otherwise restrict
 throughput unintentionally.  But if you know that your throughput upper bound
@@ -249,6 +343,7 @@ microseconds.  For  example, if you know that you cannot do better than 100000
 files/sec and you have 20 threads running,try a 60/100000 = 600 microsecond
 pause.  Verify that this isn't affecting throughput by reducing the pause and
 running a longer test.
+
 
 Use with distributed filesystems
 ---------
@@ -274,9 +369,11 @@ mountpoint exported from a Linux NFS server, mounted with the option actimeo=1
 then reference this mountpoint using the –network-sync-dir option of smallfile.
 For example:
 
-  # mount -t nfs -o actimeo=1 your-linux-server:/your/nfs/export /mnt/nfs
-  # ./smallfile_cli.py –top /your/distributed/filesystem \
+```
+# mount -t nfs -o actimeo=1 your-linux-server:/your/nfs/export /mnt/nfs
+# ./smallfile_cli.py –top /your/distributed/filesystem \
     –network-sync-dir /mnt/nfs/smf-shared
+```
 
 For non-Windows tests, the user must set up password-less ssh between the test
 driver and the host. If security is an issue, a non-root username can be used
@@ -297,8 +394,13 @@ Then from the test driver, you could run specifying your hosts:
 
     python smallfile_cli.py –top z:\smf –host-set gprfc023,gprfc024
 
+The dreaded startup timeout error
+============
 
-Use with non-networked filesystems
+If you get the error "Exception: starting signal not seen within 11 seconds" when running a distributed test with a lot of subdirectories, the problem may be caused by insufficient time for the worker threads to get ready to run the test.   In some cases, this was caused by a flaw in smallfile's timeout calculation (which we believe is fixed).  However, before smallfile actually starts a test, each worker thread must prepare a directory tree to hold the files that will be used in the test.   This ensures that we are not measuring directory creation overhead when running a file create test, for example.  For some filesystems, directory creation can be more expensive at scale.  We take this into account with the --min-dirs-per-sec parameter, which defaults to a value more appropriate for local filesystems.   If we are doing a large distributed filesystem test, it may be necessary to lower this parameter somewhat, based on the filesystem's performance, which you can measure using --operation mkdir, and then use a value of about half what you see there.  This will result in a larger timeout value, which you can obtain using "--output-json your-test.json" -- look for the 'startup-timeout' and 'host-timeout' parameters in this file to see what timeout is being calculated.
+
+
+Use with local filesystems
 -----------
 
 There are cases where you want to use a distributed filesystem test on
@@ -400,7 +502,7 @@ operations are metadata operations and do not require that the file size be
 known in advance.
 
 
-How to measure asynchronous file copy performance
+Asynchronous file copy performance
 ---------
 
 When we want to measure performance of an asynchronous file copy (example:
@@ -533,7 +635,7 @@ os.listdir() as a workaround -- this may have to be revisited for very large
 tests.
 
 
-How test parameters are transmitted to worker threads
+Test parameter transmission
 --------
 
 The results of the command line parse are saved in a smf_test_params object and
@@ -542,14 +644,14 @@ architecture or operating system. The file is placed in the shared network
 directory. Remote worker processes are invoked via the smallfile_remote.py
 command and read this file to discover test parameters.
 
-How remote worker threads are launched
+Launching remote worker threads
 ----------
 
 For Linux or other non-Windows environments, the test driver launches worker threads using parallel ssh commands to invoke the smallfile_remote.py program, and when this program exits, that is how the test driver discovers that the remote threads on this host have completed.
 
 For Windows environments, ssh usage is more problematic. Sshd requires installation of cygwin, a Windows app that emulates a Linux-like environment, but we really want to test with native win32 environment instead. So a different launching method is used (and this method works on non-Windows environments as well). 
 
-How results are returned to master process
+Returning results
 -----------------
 
 For either single-host or multi-host tests, each test thread is implemented as

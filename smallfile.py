@@ -92,6 +92,9 @@ O_BINARY = 0
 if is_windows_os:
     O_BINARY = os.O_BINARY
 
+# for timeout debugging
+
+debug_timeout = os.getenv('DEBUG_TIMEOUT')
 
 # FIXME: pass in file pathname instead of file number
 
@@ -146,6 +149,8 @@ def touch(fn):
 def abort_test(abort_fn, thread_list):
     if not os.path.exists(abort_fn):
         touch(abort_fn)
+    for t in thread_list:
+        t.terminate()
 
 
 # create directory if it's not already there
@@ -161,6 +166,7 @@ def ensure_dir_exists(dirpath):
         ensure_dir_exists(parent_path)
         try:
             os.mkdir(dirpath)
+            if debug_timeout: time.sleep(1)
         except os.error as e:
             if e.errno != errno.EEXIST:  # workaround for filesystem bug
                 raise e
@@ -780,6 +786,8 @@ class SmallfileWorkload:
             os.sep,
             self.prefix,
             '_',
+            self.onhost,
+            '_',
             self.tid,
             '_',
             str(filenum),
@@ -949,6 +957,7 @@ class SmallfileWorkload:
             if not exists(unique_dpath):
                 try:
                     os.makedirs(unique_dpath, 0o777)
+                    if debug_timeout: time.sleep(1)
                 except OSError as e:
                     if not (e.errno == errno.EEXIST
                             and self.is_shared_dir):
@@ -1725,8 +1734,10 @@ class Test(unittest_class):
         lastfn = ivk.mk_file_nm(ivk.src_dirs, ivk.iterations)
 
         expectedFn = join(join(self.invok.src_dirs[0], 'd_000'),
-                          ivk.prefix + '_' + ivk.tid + '_1_'
-                          + ivk.suffix)
+                          ivk.prefix + '_' + 
+                          ivk.onhost + '_' + 
+                          ivk.tid + '_1_' + 
+                          ivk.suffix)
         self.assertTrue(fn == expectedFn)
         self.assertTrue(exists(fn))
         self.assertTrue(exists(lastfn))
@@ -1986,7 +1997,7 @@ class Test(unittest_class):
         fn = self.lastFileNameInTest(self.invok.src_dirs)
         expectedFn = os.sep.join([self.invok.src_dirs[0], 'h_001',
                                   'h_000', 'h_001',
-                                  'p_regtest_499_deep_hashed'])
+                                  'p_%s_regtest_499_deep_hashed' % self.invok.onhost])
         self.assertTrue(fn == expectedFn)
         self.assertTrue(exists(fn))
         self.cleanup_files()
